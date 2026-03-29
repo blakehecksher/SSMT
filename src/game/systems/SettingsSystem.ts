@@ -3,11 +3,14 @@ import { SETTINGS_KEY } from '../constants';
 export interface GameSettings {
   screenShake: boolean;
   scanlines: boolean;
+  /** iPadOS-style morphing cursor overlay. Set false to disable entirely. */
+  ipadCursor: boolean;
 }
 
 const DEFAULT_SETTINGS: GameSettings = {
   screenShake: true,
   scanlines: true,
+  ipadCursor: true,
 };
 
 let cachedSettings: GameSettings | null = null;

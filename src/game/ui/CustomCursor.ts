@@ -1,5 +1,7 @@
 import Phaser from 'phaser';
 import { COLORS } from '../constants';
+import { getSettings } from '../systems/SettingsSystem';
+import { ipadCursorEnable, ipadCursorDisable, ipadCursorSetHover, type CSSRect } from './IPadCursor';
 
 export const SHOW_CIRCLE = true;
 
@@ -18,6 +20,47 @@ const TICK_OUTER = 6;  // px outside the circle
 
 // Radians to leave as a gap on each side of a tick where the circle is broken
 const ARC_GAP = 0.28;
+
+/**
+ * Convert a Phaser game object's bounding box to CSS viewport pixel coordinates
+ * so the iPadOS overlay can morph to wrap it.
+ *
+ * Handles both scrollFactor=0 (UI/fixed) and scrollFactor=1 (world-space) objects.
+ */
+function objectToCSSRect(obj: Phaser.GameObjects.GameObject, scene: Phaser.Scene): CSSRect | null {
+  if (!('getBounds' in obj)) return null;
+
+  const bounds = (obj as unknown as { getBounds(): Phaser.Geom.Rectangle }).getBounds();
+  const canvas = scene.sys.game.canvas;
+  const cr = canvas.getBoundingClientRect();
+  // Scale between Phaser's internal game pixels and CSS pixels.
+  const sx = cr.width / canvas.width;
+  const sy = cr.height / canvas.height;
+
+  const sfX: number = (obj as unknown as { scrollFactorX?: number }).scrollFactorX ?? 1;
+  const sfY: number = (obj as unknown as { scrollFactorY?: number }).scrollFactorY ?? 1;
+
+  let bx = bounds.x;
+  let by = bounds.y;
+  let zoomX = 1;
+  let zoomY = 1;
+
+  if (sfX !== 0 || sfY !== 0) {
+    // World-space object: apply camera scroll and zoom to get screen-space coords.
+    const cam = scene.cameras.main;
+    bx = (bounds.x - cam.worldView.x) * cam.zoom;
+    by = (bounds.y - cam.worldView.y) * cam.zoom;
+    zoomX = cam.zoom;
+    zoomY = cam.zoom;
+  }
+
+  return {
+    left: cr.left + bx * sx,
+    top: cr.top + by * sy,
+    width: bounds.width * zoomX * sx,
+    height: bounds.height * zoomY * sy,
+  };
+}
 
 export class CustomCursor {
   private graphic: Phaser.GameObjects.Graphics;
@@ -40,6 +83,10 @@ export class CustomCursor {
       this.styleEl = document.createElement('style');
       this.styleEl.textContent = 'canvas { cursor: none !important; }';
       document.head.appendChild(this.styleEl);
+
+      if (getSettings().ipadCursor) {
+        ipadCursorEnable();
+      }
     }
   }
 
@@ -69,7 +116,16 @@ export class CustomCursor {
     }
 
     // Check if pointer is over any interactive object
-    this.hovering = scene.input.hitTestPointer(pointer).length > 0;
+    const hits = scene.input.hitTestPointer(pointer);
+    this.hovering = hits.length > 0;
+
+    // Drive the iPadOS overlay cursor
+    if (getSettings().ipadCursor) {
+      const hoverRect = this.hovering
+        ? objectToCSSRect(hits[0] as Phaser.GameObjects.GameObject, scene)
+        : null;
+      ipadCursorSetHover(hoverRect);
+    }
 
     this.graphic.setPosition(pointer.x, pointer.y);
     this.draw();
@@ -125,7 +181,9 @@ export class CustomCursor {
     g.strokePath();
   }
 
-  destroy(scene: Phaser.Scene): void {
+  destroy(_scene: Phaser.Scene): void {
+    ipadCursorSetHover(null);
+    ipadCursorDisable();
     this.styleEl?.remove();
     this.graphic.destroy();
   }
